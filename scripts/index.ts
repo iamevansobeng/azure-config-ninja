@@ -40,6 +40,27 @@ class ConfigUploader {
     fs.writeFileSync(this.configPath, JSON.stringify(storedConfig, null, 2));
   }
 
+  private async getWebAppsInResourceGroup(
+    resourceGroup: string
+  ): Promise<string[]> {
+    try {
+      const webAppsJson = execSync(
+        `
+        az webapp list \
+          --resource-group ${resourceGroup} \
+          --query "[].name" \
+          --output json
+      `,
+        { encoding: "utf8" }
+      );
+
+      return JSON.parse(webAppsJson);
+    } catch (error) {
+      console.error("Failed to fetch web apps:", error);
+      return [];
+    }
+  }
+
   private async getAvailableEnvironments(
     appName: string,
     resourceGroup: string
@@ -95,24 +116,35 @@ class ConfigUploader {
       }
     }
 
-    // List available resource groups
+    // First, get resource groups
     const resourceGroups = JSON.parse(
       execSync('az group list --query "[].name"', { encoding: "utf8" })
     );
 
-    // List available web apps
-    const webApps = JSON.parse(
-      execSync('az webapp list --query "[].name"', { encoding: "utf8" })
-    );
-
-    // Ask for resource group and app name first
-    const initialQuestions: QuestionCollection = [
+    // Ask for resource group first
+    const resourceGroupQuestion: QuestionCollection = [
       {
         type: "list",
         name: "resourceGroup",
         message: "Select the resource group:",
         choices: resourceGroups,
       },
+    ];
+
+    const { resourceGroup } = await inquirer.prompt<
+      Pick<AzureConfig, "resourceGroup">
+    >(resourceGroupQuestion);
+
+    // Then get apps for selected resource group
+    const webApps = await this.getWebAppsInResourceGroup(resourceGroup);
+
+    if (webApps.length === 0) {
+      console.error("No web apps found in this resource group");
+      process.exit(1);
+    }
+
+    // Ask for app name
+    const appQuestion: QuestionCollection = [
       {
         type: "list",
         name: "appName",
@@ -121,17 +153,16 @@ class ConfigUploader {
       },
     ];
 
-    const { resourceGroup, appName } = await inquirer.prompt<
-      Pick<AzureConfig, "resourceGroup" | "appName">
-    >(initialQuestions);
+    const { appName } = await inquirer.prompt<Pick<AzureConfig, "appName">>(
+      appQuestion
+    );
 
-    // Get available environments for this app
+    // Get environments for selected app
     const environments = await this.getAvailableEnvironments(
       appName,
       resourceGroup
     );
 
-    // Then ask for environment
     const envQuestion: QuestionCollection = [
       {
         type: "list",

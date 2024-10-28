@@ -1,13 +1,12 @@
 {
-  "name": "app-service-env",
+  "name": "azure-config-ninja",
   "version": "1.0.0",
-  "main": "scripts/index.ts",
-  "keywords": [],
-  "author": "",
-  "license": "ISC",
-  "description": "",
+  "description": "Because manually updating Azure configs is so 2022",
+  "main": "dist/index.js",
   "scripts": {
-    "man": "ts-node scripts/index.ts"
+    "yeet-env": "ts-node scripts/index.ts",
+    "build": "tsc",
+    "prepare": "npm run build"
   },
   "dependencies": {
     "dotenv": "^16.0.3",
