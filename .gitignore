@@ -13,6 +13,8 @@ coverage/**
 # Environment files
 .env
 
+# CONFIG FOR RECENT ENV DEPLOYMENTS
+.azure-config.json
 
 # Dependency directories
 node_modules
