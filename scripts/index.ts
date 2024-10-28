@@ -40,6 +40,35 @@ class ConfigUploader {
     fs.writeFileSync(this.configPath, JSON.stringify(storedConfig, null, 2));
   }
 
+  private async getAvailableEnvironments(
+    appName: string,
+    resourceGroup: string
+  ): Promise<string[]> {
+    try {
+      // Get deployment slots
+      const slotsJson = execSync(
+        `
+        az webapp deployment slot list \
+          --name ${appName} \
+          --resource-group ${resourceGroup} \
+          --query "[].name" \
+          --output json
+      `,
+        { encoding: "utf8" }
+      );
+
+      const slots = JSON.parse(slotsJson);
+
+      // Always include production (main slot)
+      const environments = ["production", ...slots];
+
+      return environments;
+    } catch (error) {
+      console.log("Unable to fetch slots, using default environments");
+      return ["production"]; // Production always exists
+    }
+  }
+
   private async promptForConfiguration(
     storedConfig: StoredConfig | null
   ): Promise<AzureConfig> {
@@ -76,7 +105,8 @@ class ConfigUploader {
       execSync('az webapp list --query "[].name"', { encoding: "utf8" })
     );
 
-    const questions: QuestionCollection = [
+    // Ask for resource group and app name first
+    const initialQuestions: QuestionCollection = [
       {
         type: "list",
         name: "resourceGroup",
@@ -89,15 +119,73 @@ class ConfigUploader {
         message: "Select the web app:",
         choices: webApps,
       },
+    ];
+
+    const { resourceGroup, appName } = await inquirer.prompt<
+      Pick<AzureConfig, "resourceGroup" | "appName">
+    >(initialQuestions);
+
+    // Get available environments for this app
+    const environments = await this.getAvailableEnvironments(
+      appName,
+      resourceGroup
+    );
+
+    // Then ask for environment
+    const envQuestion: QuestionCollection = [
       {
         type: "list",
         name: "environment",
         message: "Select the environment:",
-        choices: ["production", "staging", "development"],
+        choices: environments,
+        default: "production",
       },
     ];
 
-    return await inquirer.prompt<AzureConfig>(questions);
+    const { environment } = await inquirer.prompt<
+      Pick<AzureConfig, "environment">
+    >(envQuestion);
+
+    return {
+      resourceGroup,
+      appName,
+      environment,
+    };
+  }
+
+  private async createNewSlot(config: AzureConfig): Promise<void> {
+    const createSlotQuestion: QuestionCollection = {
+      type: "confirm",
+      name: "createSlot",
+      message: `Environment '${config.environment}' doesn't exist. Create it as a new slot?`,
+      default: false,
+    };
+
+    const { createSlot } = await inquirer.prompt<{ createSlot: boolean }>(
+      createSlotQuestion
+    );
+
+    if (createSlot) {
+      console.log(`Creating new slot '${config.environment}'...`);
+      try {
+        execSync(
+          `
+          az webapp deployment slot create \
+            --name ${config.appName} \
+            --resource-group ${config.resourceGroup} \
+            --slot ${config.environment}
+        `,
+          { stdio: "inherit" }
+        );
+        console.log("✅ Slot created successfully!");
+      } catch (error) {
+        console.error("Failed to create slot:", error);
+        process.exit(1);
+      }
+    } else {
+      console.log("Operation cancelled");
+      process.exit(0);
+    }
   }
 
   private async getSlotSettings(config: AzureConfig): Promise<string[]> {
@@ -172,6 +260,15 @@ class ConfigUploader {
 
     const storedConfig = await this.loadStoredConfig();
     const config = await this.promptForConfiguration(storedConfig);
+
+    // Check if selected environment exists
+    const environments = await this.getAvailableEnvironments(
+      config.appName,
+      config.resourceGroup
+    );
+    if (!environments.includes(config.environment)) {
+      await this.createNewSlot(config);
+    }
 
     // Determine env file and slot
     const envFile =
