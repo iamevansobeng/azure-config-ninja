@@ -11,7 +11,7 @@ lib-cov/**
 coverage/**
 
 # Environment files
-.env
+.env*
 
 # CONFIG FOR RECENT ENV DEPLOYMENTS
 .azure-config.json
